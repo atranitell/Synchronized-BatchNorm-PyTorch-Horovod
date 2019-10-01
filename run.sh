@@ -1,0 +1,1 @@
+HOROVOD_CACHE_CAPACITY=0 horovodrun -np 4 -H localhost:4 python sync_bn_horovod.py
