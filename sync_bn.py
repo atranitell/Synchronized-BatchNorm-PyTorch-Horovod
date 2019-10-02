@@ -79,17 +79,16 @@ class _SynchronizedBatchNorm(_BatchNorm):
         else:  # use exponential moving average
           exponential_average_factor = self.momentum
 
-    if not self.training:
-      return F.batch_norm(
-          inputs, self.running_mean, self.running_var, self.weight, self.bias,
-          self.training or not self.track_running_stats,
-          exponential_average_factor, self.eps)
+    # if not self.training:
+    #   return F.batch_norm(
+    #       inputs, self.running_mean, self.running_var, self.weight, self.bias,
+    #       self.training or not self.track_running_stats,
+    #       exponential_average_factor, self.eps)
 
     # Resize the input to (B, C, -1).
     ch = self.num_features
     inputs_shape = inputs.size()
     inputs = inputs.reshape(inputs.size(0), ch, -1)
-    sum_size = inputs.size(0) * inputs.size(2) * hvd.size()
 
     # reshape
     if self.affine:
@@ -97,27 +96,29 @@ class _SynchronizedBatchNorm(_BatchNorm):
       bias = self.bias.view(1, ch, 1)
 
     # verification inference version (the only is used to test function)
-    # if not self.training:
-    #   if self.track_running_stats:
-    #     mean = self.running_mean.view(1, ch, 1)
-    #     inv_std = 1.0 / (self.running_var + self.eps).sqrt().view(1, ch, 1)
-    #     if self.affine:
-    #       outputs = weight * inv_std * (inputs - mean) + bias
-    #     else:
-    #       outputs = inv_std * (inputs - mean)
-    #   else:
-    #     in_sum = inputs.sum(dim=[0, 2]).view(1, ch, 1)
-    #     in_ssum = inputs.pow(2).sum(dim=[0, 2]).view(1, ch, 1)
-    #     mean = in_sum / sum_size
-    #     var = in_ssum / sum_size - mean.pow(2)
-    #     inv_std = 1.0 / (var + self.eps).sqrt()
-    #     if self.affine:
-    #       outputs = weight * inv_std * (inputs - mean) + bias
-    #     else:
-    #       outputs = inv_std * (inputs - mean)
-    #   return outputs.reshape(inputs_shape)
+    if not self.training:
+      if self.track_running_stats:
+        mean = self.running_mean.view(1, ch, 1)
+        inv_std = 1.0 / (self.running_var + self.eps).sqrt().view(1, ch, 1)
+        if self.affine:
+          outputs = weight * inv_std * (inputs - mean) + bias
+        else:
+          outputs = inv_std * (inputs - mean)
+      else:
+        sum_size = inputs.size(0) * inputs.size(2)
+        stat_sum = inputs.sum(dim=[0, 2]).view(1, ch, 1)
+        stat_ssum = inputs.pow(2).sum(dim=[0, 2]).view(1, ch, 1)
+        mean = stat_sum / sum_size
+        var = stat_ssum / sum_size - mean.pow(2)
+        inv_std = 1.0 / (var + self.eps).sqrt()
+        if self.affine:
+          outputs = weight * inv_std * (inputs - mean) + bias
+        else:
+          outputs = inv_std * (inputs - mean)
+      return outputs.reshape(inputs_shape)
 
     # Compute the sum and square-sum.
+    sum_size = inputs.size(0) * inputs.size(2) * hvd.size()
     stat_sum = inputs.sum(dim=[0, 2])
     stat_ssum = inputs.pow(2).sum(dim=[0, 2])
 

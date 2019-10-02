@@ -114,10 +114,32 @@ def test_resnet(affine, track_running_stats):
 
   # prepare inputs
   num_samples = 8
-  num_steps = 3
+  num_steps = 10
   inputs = torch.rand(num_steps, num_samples, 3, 32, 32).float().to(device)
   start_idx = hvd.rank() * int(num_samples / hvd.size())
   end_idx = (hvd.rank() + 1) * int(num_samples / hvd.size())
+
+  # test inference
+  if hvd.rank() == 0:
+    print('[INFERENCE PHASE-1]')
+
+  model.eval()
+  with torch.no_grad():
+    for i in range(num_steps):
+      t1 = time.time()
+      outputs = model(inputs[i])
+      t2 = (time.time() - t1) * 1000
+      if hvd.rank() == 0:
+        view('model.outputs.%d-%.4f' % (i, t2), outputs)
+
+  sync_model.eval()
+  with torch.no_grad():
+    for i in range(num_steps):
+      t1 = time.time()
+      outputs = sync_model(inputs[i])
+      t2 = (time.time() - t1) * 1000
+      if hvd.rank() == 0:
+        view('sync_model.outputs.%d-%.4f' % (i, t2), outputs)
 
   # test training
   if hvd.rank() == 0:
@@ -127,12 +149,14 @@ def test_resnet(affine, track_running_stats):
   model.train()
   optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
   for i in range(num_steps):
+    t1 = time.time()
     outputs = model(inputs[i])
+    t2 = (time.time() - t1) * 1000
     loss = outputs.mean()
     optimizer.zero_grad()
     loss.backward()
     if hvd.rank() == 0:
-      view('model.outputs.%d' % i, outputs)
+      view('model.outputs.%d-%.4f' % (i, t2), outputs)
     optimizer.step()
 
   # using sync-version
@@ -143,33 +167,16 @@ def test_resnet(affine, track_running_stats):
   hvd.broadcast_parameters(sync_model.state_dict(), root_rank=0)
 
   for i in range(num_steps):
+    t1 = time.time()
     outputs = sync_model(inputs[i, start_idx: end_idx])
+    t2 = (time.time() - t1) * 1000
     loss = outputs.mean()
     optimizer.zero_grad()
     loss.backward()
     outputs = hvd.allgather(outputs)
     if hvd.rank() == 0:
-      view('sync_model.outputs.%d' % i, outputs)
+      view('sync_model.outputs.%d-%.4f' % (i, t2), outputs)
     optimizer.step()
-
-  # test inference
-  if hvd.rank() == 0:
-    print('[INFERENCE PHASE-1]')
-
-  model.eval()
-  with torch.no_grad():
-    for i in range(num_steps):
-      outputs = model(inputs[i])
-      if hvd.rank() == 0:
-        view('model.outputs.%d' % i, outputs)
-
-  sync_model.eval()
-  with torch.no_grad():
-    for i in range(num_steps):
-      outputs = sync_model(inputs[i, start_idx: end_idx])
-      outputs = hvd.allgather(outputs)
-      if hvd.rank() == 0:
-        view('sync_model.outputs.%d' % i, outputs)
 
   # test inference
   if hvd.rank() == 0:
@@ -178,17 +185,20 @@ def test_resnet(affine, track_running_stats):
   model.eval()
   with torch.no_grad():
     for i in range(num_steps):
+      t1 = time.time()
       outputs = model(inputs[i])
+      t2 = (time.time() - t1) * 1000
       if hvd.rank() == 0:
-        view('model.outputs.%d' % i, outputs)
+        view('model.outputs.%d-%.4f' % (i, t2), outputs)
 
   sync_model.eval()
   with torch.no_grad():
     for i in range(num_steps):
-      outputs = sync_model(inputs[i, start_idx: end_idx])
-      outputs = hvd.allgather(outputs)
+      t1 = time.time()
+      outputs = sync_model(inputs[i])
+      t2 = (time.time() - t1) * 1000
       if hvd.rank() == 0:
-        view('sync_model.outputs.%d' % i, outputs)
+        view('sync_model.outputs.%d-%.4f' % (i, t2), outputs)
 
   if hvd.rank() == 0:
     # for key, value in sync_model.state_dict().items():
