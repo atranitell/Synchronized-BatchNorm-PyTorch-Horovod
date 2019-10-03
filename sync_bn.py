@@ -99,18 +99,15 @@ class _SynchronizedBatchNorm(_BatchNorm):
     if not self.training:
       if self.track_running_stats:
         mean = self.running_mean.view(1, ch, 1)
-        inv_std = 1.0 / (self.running_var + self.eps).sqrt().view(1, ch, 1)
+        inv_std = 1 / (self.running_var + self.eps).sqrt().view(1, ch, 1)
         if self.affine:
           outputs = weight * inv_std * (inputs - mean) + bias
         else:
           outputs = inv_std * (inputs - mean)
       else:
-        sum_size = inputs.size(0) * inputs.size(2)
-        stat_sum = inputs.sum(dim=[0, 2]).view(1, ch, 1)
-        stat_ssum = inputs.pow(2).sum(dim=[0, 2]).view(1, ch, 1)
-        mean = stat_sum / sum_size
-        var = stat_ssum / sum_size - mean.pow(2)
-        inv_std = 1.0 / (var + self.eps).sqrt()
+        var, mean = torch.var_mean(
+            inputs, unbiased=False, dim=[0, 2], keepdim=True)
+        inv_std = 1 / (var + self.eps).sqrt()
         if self.affine:
           outputs = weight * inv_std * (inputs - mean) + bias
         else:
